@@ -721,6 +721,12 @@ proj_date, proj_yrs, proj_mos = project_ndz_target(
 )
 
 st.title("🏡 Home Loan & 📈 Investment Tracker")
+# Visible deployment check: if this banner is missing, Streamlit is running a different file/old version.
+st.info(
+    "🌱 **Creative Use-Value is installed!** Explore the 6 forms of creative effort "
+    "behind your 23 selected investments in the **🌱 Creative Use-Value** tab below. "
+    "(Dashboard build: Creative Plane v2)"
+)
 
 st.markdown("""
 <style>
@@ -920,6 +926,36 @@ with tab_creative:
         margin-top: 18px; border-left: 3px solid #86EFAC;
         padding-left: 14px; color: #D1FAE5; font-style: italic;
     }
+    /* The guiding thought and context belong at the top, not below the cards. */
+    .creative-guiding-thought {
+        margin: 0 0 12px 0;
+        padding: 18px 22px;
+        border-radius: 14px;
+        border: 1px solid rgba(110, 231, 183, .45);
+        background: linear-gradient(120deg, #12332D, #172B37);
+        color: #ECFDF5;
+    }
+    .creative-guiding-thought .heading {
+        font-weight: 750; letter-spacing: .35px; font-size: 13px;
+        color: #86EFAC; margin-bottom: 7px;
+    }
+    .creative-guiding-thought .message {
+        font-size: 17px; line-height: 1.65; font-weight: 600;
+        margin: 0; color: #F0FDF4;
+    }
+    .creative-context-note {
+        padding: 15px 20px;
+        margin: 0 0 24px 0;
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, .28);
+        background: #1A2635;
+        color: #E2E8F0;
+        font-size: 14px;
+        line-height: 1.6;
+    }
+    .creative-context-note strong {
+        color: #F8FAFC;
+    }
     .creative-card {
         border-radius: 16px; border: 1px solid rgba(148,163,184,0.2);
         background: linear-gradient(150deg, #182537, #111D2E);
@@ -958,6 +994,21 @@ with tab_creative:
     </div>
     """), unsafe_allow_html=True)
 
+    # Show both notes prominently before the metrics and six theme cards.
+    st.markdown(dedent("""
+    <div class="creative-guiding-thought">
+        <div class="heading">🌿 My Creative Plane reminder</div>
+        <p class="message">My contribution is to choose consciously, remain patient,
+        and appreciate the useful work being done.</p>
+    </div>
+    <div class="creative-context-note">
+        <strong>About these descriptions:</strong>
+        These are descriptions of intended social and economic use-value, not independent
+        ethical certifications or guarantees that every business activity is harmless.
+        The selection is your chosen 17 companies and 6 sector ETFs, not a live holdings report.
+    </div>
+    """), unsafe_allow_html=True)
+
     count_col1, count_col2, count_col3 = st.columns(3)
     count_col1.metric("Creative themes", len(CREATIVE_USE_VALUE_GROUPS))
     etf_symbols = {"BANKBEES", "ITBEES", "PHARMABEES", "INFRABEES", "AUTOBEES", "MODEFENCE"}
@@ -993,15 +1044,6 @@ with tab_creative:
                 with st.expander(f"What each of these {len(group['investments'])} investments enables"):
                     for symbol, contribution in group["investments"]:
                         st.markdown(f"**{symbol}** — {contribution}")
-
-    st.caption(
-        "These are descriptions of intended social and economic use-value, not "
-        "independent ethical certifications or guarantees that every business activity is harmless. "
-        "The selection is your chosen 17 companies and 6 sector ETFs, not a live holdings report."
-    )
-    st.markdown(
-        "*🌿 My contribution is to choose consciously, remain patient, and appreciate the useful work being done.*"
-    )
 
 with tab_dashboard:
     with st.container(border=True):
