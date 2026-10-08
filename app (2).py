@@ -1001,12 +1001,6 @@ with tab_creative:
         <p class="message">My contribution is to choose consciously, remain patient,
         and appreciate the useful work being done.</p>
     </div>
-    <div class="creative-context-note">
-        <strong>About these descriptions:</strong>
-        These are descriptions of intended social and economic use-value, not independent
-        ethical certifications or guarantees that every business activity is harmless.
-        The selection is your chosen 17 companies and 6 sector ETFs, not a live holdings report.
-    </div>
     """), unsafe_allow_html=True)
 
     count_col1, count_col2, count_col3 = st.columns(3)
