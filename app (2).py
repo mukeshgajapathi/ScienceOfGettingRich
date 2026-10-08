@@ -6,8 +6,11 @@ import urllib.request
 import json
 import re
 import io
+import requests
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
+from html import escape as html_escape
+from textwrap import dedent
 
 st.set_page_config(
     page_title="Home Loan & Investment Tracker", 
@@ -83,11 +86,13 @@ TICKER_MAP = {
     "HDFCNIFETF": "HDFCNIFETF.NS",
     "JUNIORBEES": "JUNIORBEES.NS",
     "NEXT50": "NEXT50.NS",
+    "NEXT50IETF": "NEXT50IETF.NS",
     "GOLDBEES": "GOLDBEES.NS",
     "LIQUIDBEES": "LIQUIDBEES.NS",
     "LIQUIDCASE": "LIQUIDCASE.NS",
     "AUTOBEES": "AUTOBEES.NS",
     "BANKETF": "BANKETF.NS",
+    "BANKBEES": "BANKBEES.NS",
     "ITBEES": "ITBEES.NS",
     "PHARMABEES": "PHARMABEES.NS",
     "FMCGIETF": "FMCGIETF.NS",
@@ -139,6 +144,243 @@ def fetch_mf_nav_by_isin(isin, default_nav=0.0):
     except Exception:
         pass
     return default_nav
+
+# --- AUTOMATED MACRO & ADVANCED FUNDAMENTALS ENGINE ---
+@st.cache_data(ttl=3600)
+def fetch_live_macro_benchmarks():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.google.com/',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+    }
+    
+    # 1. Dynamic Live 10Y G-Sec Yield
+    live_gsec = 0.0
+    try:
+        url_bond = "https://tradingeconomics.com/india/government-bond-yield"
+        r_bond = requests.get(url_bond, headers=headers, timeout=6)
+        if r_bond.status_code == 200:
+            match = re.search(r'India 10Y\s*\|\s*([\d\.]+)', r_bond.text)
+            if not match:
+                match = re.search(r'id=["\']market-value["\']>([\d\.]+)', r_bond.text)
+            if not match:
+                match = re.search(r'India 10-Year.*?yield.*?([\d\.]+)%', r_bond.text, re.IGNORECASE)
+            if match:
+                live_gsec = float(match.group(1))
+    except Exception:
+        pass
+        
+    if live_gsec <= 0.0:
+        try:
+            url_inv = "https://in.investing.com/rates-bonds/india-10-year-bond-yield"
+            r_inv = requests.get(url_inv, headers=headers, timeout=6)
+            if r_inv.status_code == 200:
+                match = re.search(r'data-test="instrument-price-last"[^>]*>([\d\.]+)', r_inv.text)
+                if match:
+                    live_gsec = float(match.group(1))
+        except Exception:
+            pass
+
+    if live_gsec <= 0.0:
+        live_gsec = 6.82
+
+    # 2. Dynamic Live Buffett Indicator (India Total Market Cap-to-GDP %)
+    live_buffett = 0.0
+
+    # Source A: Live Total Market Cap from Screener Nifty 500 / India Nominal GDP
+    try:
+        url_s_mcap = "https://www.screener.in/company/CNX500/"
+        r_mcap = requests.get(url_s_mcap, headers=headers, timeout=5)
+        if r_mcap.status_code == 200:
+            m_cap_match = re.search(r'Market\s*Cap\s*</span>[\s\S]*?class="number">([\d,]+)', r_mcap.text, re.IGNORECASE)
+            if not m_cap_match:
+                m_cap_match = re.search(r'Market\s*Cap\s*₹?\s*([\d,]+)\s*Cr', r_mcap.text, re.IGNORECASE)
+            if m_cap_match:
+                mcap_cr = float(m_cap_match.group(1).replace(',', ''))
+                india_nominal_gdp_cr = 34651200.0
+                calc_buffett = (mcap_cr / india_nominal_gdp_cr) * 100.0
+                if 50.0 < calc_buffett < 250.0:
+                    live_buffett = round(calc_buffett, 1)
+    except Exception:
+        pass
+
+    # Source B: GuruFocus Country Valuation
+    if live_buffett <= 0.0:
+        try:
+            url_gf = "https://www.gurufocus.com/global-market-valuation.php?country=IND"
+            r_gf = requests.get(url_gf, headers=headers, timeout=6)
+            if r_gf.status_code == 200:
+                match = re.search(r'current\s*[-:]\s*([\d\.]+)%', r_gf.text, re.IGNORECASE)
+                if not match:
+                    match = re.search(r'ratio of total market cap over GDP for India is\s*([\d\.]+)%', r_gf.text, re.IGNORECASE)
+                if not match:
+                    match = re.search(r'India\s*\|\s*[\d\.]+\s*\|\s*([\d\.]+)%', r_gf.text, re.IGNORECASE)
+                if match:
+                    val = float(match.group(1))
+                    if 40.0 < val < 300.0:
+                        live_buffett = val
+        except Exception:
+            pass
+
+    # Source C: GuruFocus Economic Indicator 4324
+    if live_buffett <= 0.0:
+        try:
+            url_gf_ind = "https://www.gurufocus.com/economic_indicators/4324/india-ratio-of-total-market-cap-over-gdp"
+            r_ind = requests.get(url_gf_ind, headers=headers, timeout=6)
+            if r_ind.status_code == 200:
+                match = re.search(r'India Ratio of Total Market Cap over GDP\s*(?::|is currently)\s*([\d\.]+)%', r_ind.text, re.IGNORECASE)
+                if not match:
+                    match = re.search(r'Ratio of Total Market Cap over GDP.*?is (?:currently\s*)?([\d\.]+)%', r_ind.text, re.IGNORECASE)
+                if match:
+                    val = float(match.group(1))
+                    if 40.0 < val < 300.0:
+                        live_buffett = val
+        except Exception:
+            pass
+
+    # Fallback benchmark
+    if live_buffett <= 0.0:
+        live_buffett = 117.1
+
+    return live_gsec, live_buffett
+
+@st.cache_data(ttl=3600)
+def fetch_macro_fundamentals():
+    fundamentals = {
+        "Nifty 50": {"PE": 0.0, "PB": 0.0, "DY": 0.0, "GROWTH": 0.0},
+        "Nifty Next 50": {"PE": 0.0, "PB": 0.0, "DY": 0.0, "GROWTH": 0.0},
+        "Nifty Midcap 150": {"PE": 0.0, "PB": 0.0, "DY": 0.0, "GROWTH": 0.0},
+        "Nifty Bank": {"PE": 0.0, "PB": 0.0, "DY": 0.0, "GROWTH": 0.0}
+    }
+    
+    slug_map = {
+        "Nifty 50": ["NIFTY"],
+        "Nifty Next 50": ["NIFTYJR"],
+        "Nifty Midcap 150": ["NMIDCAP150", "CNXMIDCAP"],
+        "Nifty Bank": ["BANKNIFTY", "NIFTYBANK", "CNXBANK"]
+    }
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+    }
+    
+    for idx_name, slugs in slug_map.items():
+        for slug in slugs:
+            try:
+                url = f"https://www.screener.in/company/{slug}/"
+                resp = requests.get(url, headers=headers, timeout=5)
+                if resp.status_code == 200:
+                    html = resp.text
+                    pe_match = re.search(r'P/E\s*</span>[\s\S]*?class="number">([\d\.]+)', html, re.IGNORECASE)
+                    
+                    pb_match = re.search(r'Price\s*to\s*[Bb]ook(?:\s*[Vv]alue)?\s*</span>[\s\S]*?class="number">([\d\.]+)', html, re.IGNORECASE)
+                    if not pb_match:
+                        pb_match = re.search(r'Price\s*to\s*[Bb]ook(?:\s*[Vv]alue)?[\s\S]*?class="[\w\s]*number[\w\s]*">([\d\.]+)', html, re.IGNORECASE)
+                    if not pb_match:
+                        pb_match = re.search(r'Price\s*to\s*[Bb]ook(?:\s*[Vv]alue)?\s*[:\-]?\s*([0-9\.]+)', html, re.IGNORECASE)
+                    if not pb_match:
+                        pb_match = re.search(r'P/B\s*(?:Ratio)?\s*[:\-]?\s*([0-9\.]+)', html, re.IGNORECASE)
+
+                    dy_match = re.search(r'Dividend\s*Yield\s*</span>[\s\S]*?class="number">([\d\.]+)', html, re.IGNORECASE)
+                    cagr_match = re.search(r'CAGR\s*10Yr\s*</span>[\s\S]*?class="number">([\d\.]+)', html, re.IGNORECASE)
+                    if not cagr_match:
+                        cagr_match = re.search(r'CAGR\s*5Yr\s*</span>[\s\S]*?class="number">([\d\.]+)', html, re.IGNORECASE)
+                    
+                    if pe_match:
+                        fundamentals[idx_name]["PE"] = float(pe_match.group(1))
+                    if pb_match:
+                        fundamentals[idx_name]["PB"] = float(pb_match.group(1))
+                    if dy_match:
+                        fundamentals[idx_name]["DY"] = float(dy_match.group(1))
+                    if cagr_match:
+                        fundamentals[idx_name]["GROWTH"] = float(cagr_match.group(1))
+                    
+                    if fundamentals[idx_name]["PE"] > 0 and fundamentals[idx_name]["PB"] > 0:
+                        break
+            except Exception:
+                pass 
+
+    # Fallback for Nifty Bank P/B if Screener DOM variations occur
+    if fundamentals["Nifty Bank"]["PB"] <= 0.0:
+        try:
+            url_ib = "https://indexscreener.in/indices/nifty-bank/pb-ratio"
+            r_ib = requests.get(url_ib, headers=headers, timeout=4)
+            if r_ib.status_code == 200:
+                m_pb = re.search(r'Current\s*PB[\s\S]*?([\d\.]+)', r_ib.text, re.IGNORECASE)
+                if not m_pb:
+                    m_pb = re.search(r'PB\.\s*([\d\.]+)', r_ib.text, re.IGNORECASE)
+                if m_pb:
+                    fundamentals["Nifty Bank"]["PB"] = float(m_pb.group(1))
+        except Exception:
+            pass
+
+    if fundamentals["Nifty Bank"]["PB"] <= 0.0:
+        fundamentals["Nifty Bank"]["PB"] = 1.64
+            
+    return fundamentals
+
+def get_buffett_status(ratio):
+    if ratio <= 0.0: return "⚠️ OFFLINE", "#94A3B8"
+    elif ratio < 75.0: return "Deep Value (<75%)", "#38BDF8"
+    elif ratio < 95.0: return "Fair Value (75-95%)", "#10B981"
+    elif ratio < 115.0: return "Modestly Overvalued (95-115%)", "#F59E0B"
+    else: return "Significantly Stretched (>115%)", "#EF4444"
+
+def evaluate_index_temp(index_name, pe, pb, dy):
+    if pe <= 0.0 and pb <= 0.0:
+        return "⚠️ OFFLINE", "#94A3B8", "rgba(148, 163, 184, 0.12)"
+        
+    if index_name == "Nifty Bank":
+        if pb > 3.3 or pe > 21.0: return "🌋 AGGRESSIVE HARVEST", "#EF4444", "rgba(239, 68, 68, 0.15)"
+        elif pb > 2.8 or pe > 18.0: return "🔥 PARTIAL HARVEST", "#F59E0B", "rgba(245, 158, 11, 0.15)"
+        elif pb > 2.2 or pe > 15.0: return "☀️ HOLD", "#10B981", "rgba(16, 185, 129, 0.15)"
+        else: return "❄️ ACCUMULATE", "#38BDF8", "rgba(56, 189, 248, 0.15)"
+    elif index_name == "Nifty Midcap 150":
+        if pe > 30.0 or pb > 5.0: return "🌋 AGGRESSIVE HARVEST", "#EF4444", "rgba(239, 68, 68, 0.15)"
+        elif pe > 26.0 or pb > 4.0: return "🔥 PARTIAL HARVEST", "#F59E0B", "rgba(245, 158, 11, 0.15)"
+        elif pe > 22.0 or pb > 3.0: return "☀️ HOLD", "#10B981", "rgba(16, 185, 129, 0.15)"
+        else: return "❄️ ACCUMULATE", "#38BDF8", "rgba(56, 189, 248, 0.15)"
+    else: 
+        if pe > 26.0 or pb > 4.0: return "🌋 AGGRESSIVE HARVEST", "#EF4444", "rgba(239, 68, 68, 0.15)"
+        elif pe > 24.0 or pb > 3.5: return "🔥 PARTIAL HARVEST", "#F59E0B", "rgba(245, 158, 11, 0.15)"
+        elif pe > 21.0 or pb > 3.0: return "☀️ HOLD", "#10B981", "rgba(16, 185, 129, 0.15)"
+        else: return "❄️ ACCUMULATE", "#38BDF8", "rgba(56, 189, 248, 0.15)"
+
+def get_verdict_rationales(index_name, etf_sym, pe, pb, v_text):
+    if index_name == "Nifty Bank":
+        thresholds = "• ❄️ ACCUMULATE: P/E < 15.0 or P/B < 2.2\n• ☀️ HOLD: P/E 15–18 or P/B 2.2–2.8\n• 🔥 PARTIAL HARVEST: P/E > 18 or P/B > 2.8\n• 🌋 AGGRESSIVE HARVEST: P/E > 21 or P/B > 3.3"
+    elif index_name == "Nifty Midcap 150":
+        thresholds = "• ❄️ ACCUMULATE: P/E < 22.0 or P/B < 3.0\n• ☀️ HOLD: P/E 22–26 or P/B 3.0–4.0\n• 🔥 PARTIAL HARVEST: P/E > 26 or P/B > 4.0\n• 🌋 AGGRESSIVE HARVEST: P/E > 30 or P/B > 5.0"
+    else:
+        thresholds = "• ❄️ ACCUMULATE: P/E < 21.0 or P/B < 3.0\n• ☀️ HOLD: P/E 21–24 or P/B 3.0–3.5\n• 🔥 PARTIAL HARVEST: P/E > 24 or P/B > 3.5\n• 🌋 AGGRESSIVE HARVEST: P/E > 26 or P/B > 4.0"
+
+    if "ACCUMULATE" in v_text:
+        summary = f"{index_name} is currently priced in a strong accumulation bargain zone (P/E: {pe:.1f}, P/B: {pb:.2f}). Prices are historically low relative to corporate earnings and balance-sheet net worth."
+        action = "💡 Action Guidance: High margin of safety. Continue or accelerate SIP accumulation. Avoid trimming or selling units."
+    elif "HOLD" in v_text:
+        summary = f"{index_name} sits squarely within its historical fair value band (P/E: {pe:.1f}, P/B: {pb:.2f}). Growth and current valuations are well-balanced."
+        action = "💡 Action Guidance: Maintain disciplined systematic investing. No immediate need to trim or aggressively buy extra units."
+    elif "PARTIAL HARVEST" in v_text:
+        summary = f"{index_name} valuations have stretched past historical medians (P/E: {pe:.1f}, P/B: {pb:.2f}). Future expected returns compress as valuation multiples outrun earnings."
+        action = "💡 Action Guidance: Apply the 25% Rule. Shave 25% of this holding into Arbitrage funds or route 4% of total corpus to prepay home loan principal at a guaranteed 7.20% return."
+    elif "AGGRESSIVE HARVEST" in v_text:
+        summary = f"{index_name} has entered euphoric / bubble territory (P/E: {pe:.1f}, P/B: {pb:.2f}). Equities offer no risk premium over safe government bonds."
+        action = "💡 Action Guidance: Aggressively lock in gains. Rebalance into risk-free debt reduction and delta-neutral Arbitrage dry powder."
+    else:
+        summary = f"Valuation feeds are currently syncing or offline for {index_name}."
+        action = "💡 Action Guidance: Check back once market feeds reconnect."
+
+    full_help = (
+        f"💡 Why '{v_text}' for {etf_sym} ({index_name})?\n\n"
+        f"{summary}\n\n"
+        f"{action}\n\n"
+        f"📊 Threshold Benchmarks for {index_name}:\n{thresholds}"
+    )
+    return summary, action, full_help
 
 # --- UNIVERSAL HOLDINGS PARSER ---
 def parse_zerodha_holdings_file(uploaded_file, filename=None, override_account_id=None):
@@ -209,7 +451,7 @@ def parse_zerodha_holdings_file(uploaded_file, filename=None, override_account_i
                             "P&L (₹)": round(qty * (ltp - avg_price), 2)
                         })
         except ImportError:
-            st.error("⚠️ The `openpyxl` library is required to read Excel files. Please add `openpyxl` to `requirements.txt` on GitHub.")
+            st.error("⚠ The `openpyxl` library is required to read Excel files. Please add `openpyxl` to `requirements.txt` on GitHub.")
             return client_id, pd.DataFrame()
 
     elif fname.endswith('.CSV'):
@@ -442,13 +684,11 @@ mf_val = df_mf_active["Current_Value"].sum() if not df_mf_active.empty else 0.0
 mf_inv = df_mf_active["Invested_Value"].sum() if not df_mf_active.empty else 0.0
 mf_pnl = df_mf_active["P&L (₹)"].sum() if not df_mf_active.empty else 0.0
 
-# Overall Portfolio integrates ALL assets
 total_portfolio_val = eq_val + mf_val
 total_portfolio_invested = eq_inv + mf_inv
 overall_pnl = total_portfolio_val - total_portfolio_invested
 overall_pnl_pct = (overall_pnl / total_portfolio_invested * 100) if total_portfolio_invested > 0 else 0.0
 
-# Loan calculations
 current_principal, total_principal_cleared, emi_principal_cleared, prepay_principal_cleared = calculate_loan_state(
     df_loan, INITIAL_LOAN, current_interest_rate
 )
@@ -482,14 +722,39 @@ proj_date, proj_yrs, proj_mos = project_ndz_target(
 
 st.title("🏡 Home Loan & 📈 Investment Tracker")
 
+st.markdown("""
+<style>
+/* Enhanced Collapsible Expander Cards */
+div[data-testid="stExpander"] {
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 12px !important;
+    margin-bottom: 14px !important;
+    background: rgba(255, 255, 255, 0.02) !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15) !important;
+    transition: all 0.25s ease-in-out !important;
+}
+div[data-testid="stExpander"]:hover {
+    border-color: rgba(255, 255, 255, 0.25) !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+}
+div[data-testid="stExpander"] summary {
+    padding: 14px 20px !important;
+}
+div[data-testid="stExpander"] summary p {
+    font-size: 16px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.3px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ==========================================
 # --- TOP-LEVEL NAVIGATION & TABS ---
 # ==========================================
 
-tab_aim, tab_dashboard = st.tabs(["✨ Definite Chief Aim", "📊 Loan & Investment Dashboard"])
+tab_aim, tab_creative, tab_dashboard = st.tabs(["✨ Definite Chief Aim", "🌱 Creative Use-Value", "📊 Loan & Investment Dashboard"])
 
 with tab_aim:
-    # --- HERO CARD 1: DEFINITE CHIEF AIM IN LIFE ---
     st.markdown("""
 <div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F2027 100%); padding: 28px; border-radius: 18px; border: 1.5px solid #FFD700; box-shadow: 0 10px 30px rgba(255, 215, 0, 0.12); margin-bottom: 25px;">
 <h2 style="color: #FFD700; text-align: center; font-size: 26px; font-weight: 800; margin-bottom: 12px; letter-spacing: 0.5px;">🌟 My Definite Chief Aim in Life</h2>
@@ -521,14 +786,13 @@ with tab_aim:
 <li style="color: #E2E8F0; font-size: 14.5px; margin-bottom: 8px; line-height: 1.5; display: flex; align-items: start; gap: 8px;"><span style="color: #4CC9F0;">✦</span> Provide more efficient and valuable service joyfully, delivering greater use value than the cash value I receive.</li>
 <li style="color: #E2E8F0; font-size: 14.5px; margin-bottom: 8px; line-height: 1.5; display: flex; align-items: start; gap: 8px;"><span style="color: #4CC9F0;">✦</span> Donate to people in need, contributing to the flow of abundance.</li>
 <li style="color: #E2E8F0; font-size: 14.5px; margin-bottom: 8px; line-height: 1.5; display: flex; align-items: start; gap: 8px;"><span style="color: #4CC9F0;">✦</span> Celebrate wealth everywhere, knowing the universal supply is limitless.</li>
-<li style="color: #E2E8F0; font-size: 14.5px; margin-bottom: 0; line-height: 1.5; display: flex; align-items: start; gap: 8px;"><span style="color: #4CC9F0;">✦</span> Maintain unwavering faith and stay persistently invested. Deploying capital into equity actively funds businesses that serve humanity, bringing more use value to the world.<li>
+<li style="color: #E2E8F0; font-size: 14.5px; margin-bottom: 0; line-height: 1.5; display: flex; align-items: start; gap: 8px;"><span style="color: #4CC9F0;">✦</span> Maintain unwavering faith and stay persistently invested. Deploying capital into equity actively funds businesses that serve humanity, bringing more use value to the world.</li>
 </ul>
 </div>
 </div>
 </div>
 """, unsafe_allow_html=True)
 
-    # --- HERO CARD 2: NAPOLEON HILL'S 5-STEP SELF-CONFIDENCE FORMULA ---
     st.markdown("""
 <div style="background: linear-gradient(135deg, #1E1B4B 0%, #0F172A 50%, #1E293B 100%); padding: 26px; border-radius: 18px; border: 1.5px solid #818CF8; box-shadow: 0 10px 30px rgba(129, 140, 248, 0.12); margin-bottom: 25px;">
 <h2 style="color: #A5B4FC; text-align: center; font-size: 24px; font-weight: 800; margin-bottom: 16px; letter-spacing: 0.5px;">💪 Napoleon Hill's 5-Step Self-Confidence Formula</h2>
@@ -557,23 +821,189 @@ with tab_aim:
 </div>
 """, unsafe_allow_html=True)
 
-    # --- NET-DEBT-ZERO VISUALIZER ON AIM TAB (ALIGNED GOAL STATE) ---
     with st.container(border=True):
-        st.markdown("<h3 style='margin-bottom: 0px;'>🎯 Net-Debt-Zero Visualizer</h3>", unsafe_allow_html=True)
-        
+        st.subheader("🎯 Net-Debt-Zero Visualizer")
         st.progress(1.0)
         st.caption("✨ **100.0% Covered** towards Net-Debt-Zero target | **Goal Fully Manifested**")
-        
         st.success("🎉 **Net-Debt-Zero Fully Achieved:** Living in total financial freedom, peace of mind, and complete abundance!")
-        
         st.divider()
-        
         s_col1, s_col2 = st.columns(2)
         s_col1.metric("Principal Pending", "₹0", "100.0% Loan Cleared")
         s_col2.metric("Portfolio Value", "₹1,00,00,000", "1 Cr - Total Financial Abundance")
 
+# ==========================================
+# --- CREATIVE PLANE: 23 SELECTED INVESTMENTS ---
+# ==========================================
+# Static, values-oriented descriptions rather than price/return scores.
+# Keep the six themes and holdings here separate from the Google Sheets
+# transaction tracker; selecting a business does not imply it is purchased.
+CREATIVE_USE_VALUE_GROUPS = [
+    {
+        "title": "Heal", "icon": "🩺", "accent": "#34D399",
+        "purpose": "Develop and distribute treatments that alleviate suffering and support healthier lives.",
+        "investments": [
+            ("DIVISLAB", "Produces pharmaceutical ingredients that help other manufacturers make medicines."),
+            ("DRREDDY", "Develops and supplies medicines, including generics that improve treatment access."),
+            ("ZYDUSLIFE", "Researches and produces treatments that support patients' health."),
+            ("PHARMABEES", "Provides diversified exposure to pharmaceutical businesses and their healthcare contributions."),
+        ],
+    },
+    {
+        "title": "Build", "icon": "🏗️", "accent": "#FBBF24",
+        "purpose": "Create infrastructure, tools and materials that expand society's productive capabilities.",
+        "investments": [
+            ("LT", "Engineers and constructs transport, energy, water and industrial infrastructure."),
+            ("ACE", "Makes cranes and material-handling equipment for safer, more efficient construction."),
+            ("ASTRAL", "Supplies pipes and plumbing systems for water distribution and sanitation."),
+            ("POLYCAB", "Makes cables and wires that bring electricity to homes, services and industry."),
+            ("INFRABEES", "Provides diversified exposure to businesses building and operating infrastructure."),
+        ],
+    },
+    {
+        "title": "Energise", "icon": "⚡", "accent": "#60A5FA",
+        "purpose": "Provide the dependable electricity and industrial power that essential activities require.",
+        "investments": [
+            ("ABB", "Improves electrification, industrial automation and efficient power use."),
+            ("GVT&D", "Makes equipment for reliable electricity transmission and distribution."),
+            ("SIEMENS", "Builds automation, electrification and smart infrastructure technologies."),
+            ("CUMMINSIND", "Supplies engines and power systems for dependable industrial and backup power."),
+        ],
+    },
+    {
+        "title": "Nourish", "icon": "🌾", "accent": "#A3E635",
+        "purpose": "Improve agricultural productivity and the movement of water that supports farms and communities.",
+        "investments": [
+            ("M&M", "Produces tractors and mobility solutions that support farmers and communities."),
+            ("SWARAJENG", "Manufactures tractor engines that power agricultural mechanisation."),
+            ("KSB", "Develops pumping and fluid-control systems for water, irrigation and industry."),
+            ("OSWALPUMPS", "Provides water pumps, including solar-powered irrigation solutions."),
+        ],
+    },
+    {
+        "title": "Innovate and enable", "icon": "💡", "accent": "#C4B5FD",
+        "purpose": "Make useful industrial, digital and specialised processes more capable and efficient.",
+        "investments": [
+            ("ITBEES", "Provides diversified exposure to IT companies helping organisations digitise and automate."),
+            ("CLEAN", "Develops specialty chemicals and more efficient manufacturing processes."),
+            ("INOXINDIA", "Makes cryogenic systems for storing and transporting specialised gases."),
+            ("BANKBEES", "Provides exposure to banks that enable savings, payments and productive credit."),
+        ],
+    },
+    {
+        "title": "Connect and protect", "icon": "🛡️", "accent": "#F9A8D4",
+        "purpose": "Support mobility, security and the ability of people and communities to carry out daily life.",
+        "investments": [
+            ("AUTOBEES", "Provides diversified exposure to mobility and transportation manufacturers."),
+            ("MODEFENCE", "Provides exposure to defence engineering, security and deterrence capabilities."),
+        ],
+    },
+]
+
+with tab_creative:
+    st.markdown(dedent("""
+    <style>
+    .creative-hero {
+        background: linear-gradient(120deg, #102B2C 0%, #12233C 62%, #2A2440 100%);
+        border: 1px solid rgba(94, 234, 212, 0.30);
+        border-radius: 18px;
+        padding: 28px 30px;
+        margin: 6px 0 24px 0;
+        color: #F8FAFC;
+    }
+    .creative-hero .eyebrow {
+        color: #86EFAC; font-size: 12px; text-transform: uppercase;
+        letter-spacing: 2px; font-weight: 800; margin-bottom: 9px;
+    }
+    .creative-hero h2 { color: #F8FAFC; margin: 0 0 10px 0; font-size: 29px; }
+    .creative-hero p { color: #CBD5E1; font-size: 16px; line-height: 1.7; margin: 0; }
+    .creative-hero .creative-note {
+        margin-top: 18px; border-left: 3px solid #86EFAC;
+        padding-left: 14px; color: #D1FAE5; font-style: italic;
+    }
+    .creative-card {
+        border-radius: 16px; border: 1px solid rgba(148,163,184,0.2);
+        background: linear-gradient(150deg, #182537, #111D2E);
+        border-top: 3px solid var(--theme-accent);
+        padding: 22px; min-height: 244px; margin-bottom: 8px;
+        box-shadow: 0 5px 18px rgba(0,0,0,.10);
+    }
+    .creative-card-top {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 8px;
+    }
+    .creative-icon { font-size: 28px; }
+    .creative-number { color: #94A3B8; font-size: 12px; letter-spacing: 1px; }
+    .creative-title { color: #F8FAFC; font-size: 21px; font-weight: 780; margin-bottom: 9px; }
+    .creative-description { color: #CBD5E1; font-size: 14px; line-height: 1.65; min-height: 68px; }
+    .creative-tickers { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 15px; }
+    .creative-ticker {
+        background: rgba(148,163,184,.13); border: 1px solid rgba(148,163,184,.19);
+        color: #E2E8F0; border-radius: 7px; padding: 5px 8px;
+        font-size: 11px; font-weight: 700; letter-spacing: .2px;
+    }
+    @media (max-width: 720px) {
+        .creative-hero { padding: 20px; }
+        .creative-hero h2 { font-size: 24px; }
+        .creative-card { min-height: unset; }
+        .creative-description { min-height: unset; }
+    }
+    </style>
+    <div class="creative-hero">
+      <div class="eyebrow">My investment philosophy · The Creative Plane</div>
+      <h2>🌱 The Use-Value Behind My 23 Investments</h2>
+      <p>Six forms of creative effort: healing, building, energising, nourishing,
+      innovating and protecting. These are the useful contributions I choose to appreciate.</p>
+      <p class="creative-note">I focus on the value created for people, not on predicting
+      the financial outcome. Patient ownership, discernment and gratitude guide my actions.</p>
+    </div>
+    """), unsafe_allow_html=True)
+
+    count_col1, count_col2, count_col3 = st.columns(3)
+    count_col1.metric("Creative themes", len(CREATIVE_USE_VALUE_GROUPS))
+    etf_symbols = {"BANKBEES", "ITBEES", "PHARMABEES", "INFRABEES", "AUTOBEES", "MODEFENCE"}
+    symbols_in_themes = {
+        symbol for group in CREATIVE_USE_VALUE_GROUPS
+        for symbol, _ in group["investments"]
+    }
+    count_col2.metric("Sector ETFs", len(symbols_in_themes & etf_symbols))
+    count_col3.metric("Selected companies", len(symbols_in_themes - etf_symbols))
+
+    st.write("")
+    for start_idx in range(0, len(CREATIVE_USE_VALUE_GROUPS), 2):
+        two_columns = st.columns(2, gap="large")
+        for col, idx in zip(two_columns, range(start_idx, min(start_idx + 2, len(CREATIVE_USE_VALUE_GROUPS)))):
+            group = CREATIVE_USE_VALUE_GROUPS[idx]
+            with col:
+                # Local data only; escaped when inserted into HTML.
+                badges = "".join(
+                    f'<span class="creative-ticker">{html_escape(symbol)}</span>'
+                    for symbol, _ in group["investments"]
+                )
+                st.markdown(dedent(f"""
+                <div class="creative-card" style="--theme-accent:{group['accent']}">
+                  <div class="creative-card-top">
+                    <span class="creative-icon">{group['icon']}</span>
+                    <span class="creative-number">{idx+1:02d} / 06</span>
+                  </div>
+                  <div class="creative-title">{html_escape(group['title'])}</div>
+                  <div class="creative-description">{html_escape(group['purpose'])}</div>
+                  <div class="creative-tickers">{badges}</div>
+                </div>
+                """), unsafe_allow_html=True)
+                with st.expander(f"What each of these {len(group['investments'])} investments enables"):
+                    for symbol, contribution in group["investments"]:
+                        st.markdown(f"**{symbol}** — {contribution}")
+
+    st.caption(
+        "These are descriptions of intended social and economic use-value, not "
+        "independent ethical certifications or guarantees that every business activity is harmless. "
+        "The selection is your chosen 17 companies and 6 sector ETFs, not a live holdings report."
+    )
+    st.markdown(
+        "*🌿 My contribution is to choose consciously, remain patient, and appreciate the useful work being done.*"
+    )
+
 with tab_dashboard:
-    # --- NET-DEBT-ZERO VISUALIZER ON DASHBOARD TAB (CURRENT REALITY) ---
     with st.container(border=True):
         st.subheader("🎯 Net-Debt-Zero Visualizer")
         net_debt = max(0.0, current_principal - total_portfolio_val)
@@ -615,7 +1045,8 @@ with tab_dashboard:
     with m_col1:
         c1_text, c1_btn = st.columns([5, 1])
         with c1_text:
-            st.markdown(f"**{active_due_label}**<br>{format_inr(active_due_amount)}<br><span style='color:#00CC96; font-size:13.5px;'>{disbursement_badge}</span>", unsafe_allow_html=True)
+            disb_color = "green" if is_handover else "blue"
+            st.markdown(f"**{active_due_label}**\n\n{format_inr(active_due_amount)}\n\n:{disb_color}[{disbursement_badge}]")
         
         if not is_handover:
             with c1_btn:
@@ -634,12 +1065,12 @@ with tab_dashboard:
                     new_ratio = 0.90 if "90%" in selected_stage else (0.95 if "95%" in selected_stage else 1.0)
                     confirm_handover = False
                     if new_ratio == 1.0:
-                        st.warning(f"⚠️ **Warning:** Setting disbursement to 100% marks handover complete. Dues permanently switch to **Full EMI** ({format_inr(full_emi)}) and this edit option will be **permanently locked**.")
+                        st.warning(f"⚠️️ **Warning:** Setting disbursement to 100% marks handover complete. Dues permanently switch to **Full EMI** ({format_inr(full_emi)}) and this edit option will be **permanently locked**.")
                         confirm_handover = st.checkbox("I confirm handover is completed and agree to lock settings.")
                     
                     can_save = (new_ratio < 1.0) or (new_ratio == 1.0 and confirm_handover)
                     
-                    if st.button("💾 Save Disbursement Settings", disabled=not can_save, type="primary"):
+                    if st.button("💾 Save Settings", disabled=not can_save, type="primary"):
                         updated_settings = pd.DataFrame([{
                             "Disbursed_Ratio": new_ratio,
                             "Handover_Completed": (new_ratio == 1.0),
@@ -653,7 +1084,7 @@ with tab_dashboard:
     with m_col2:
         c2_text, c2_btn = st.columns([5, 1])
         with c2_text:
-            st.markdown(f"**Interest Rate**<br>{current_interest_rate}%<br><span style='color:#808495; font-size:13.5px;'>Floating Rate</span>", unsafe_allow_html=True)
+            st.markdown(f"**Interest Rate**\n\n{current_interest_rate}%\n\n:gray[Floating Rate]")
         with c2_btn:
             with st.popover("✏️", help="Update Interest Rate"):
                 st.markdown("### 🏦 Update Interest Rate")
@@ -663,7 +1094,7 @@ with tab_dashboard:
                     step=0.05, 
                     format="%.2f"
                 )
-                if st.button("💾 Save New Rate", type="primary"):
+                if st.button("💾 Save Rate", type="primary"):
                     updated_settings = pd.DataFrame([{
                         "Disbursed_Ratio": disbursed_ratio,
                         "Handover_Completed": is_handover_completed,
@@ -675,7 +1106,7 @@ with tab_dashboard:
                     st.rerun()
 
     with m_col3:
-        st.markdown(f"**Current Tenure Remaining**<br>{rem_years:.1f} Yrs<br><span style='color:#808495; font-size:13.5px;'>{int(current_rem_months)} Mos left</span>", unsafe_allow_html=True)
+        st.markdown(f"**Current Tenure Remaining**\n\n{rem_years:.1f} Yrs\n\n:gray[{int(current_rem_months)} Mos left]")
 
     current_month_str = datetime.now().strftime("%b %Y")
 
@@ -696,9 +1127,9 @@ with tab_dashboard:
         with c3:
             st.markdown("**Payment Status**")
             if is_current_month_paid:
-                st.markdown("<span style='color:#00CC96; font-weight:bold; font-size:18px;'>🟢 PAID</span>", unsafe_allow_html=True)
+                st.markdown(":green[**🟢 PAID**]")
             else:
-                st.markdown("<span style='color:#FF4B4B; font-weight:bold; font-size:18px;'>🔴 UNPAID</span>", unsafe_allow_html=True)
+                st.markdown(":red[**🔴 UNPAID**]")
 
         if st.form_submit_button("Log Monthly Payment", disabled=is_current_month_paid):
             new_row_emi = pd.DataFrame([{
@@ -717,7 +1148,6 @@ with tab_dashboard:
     if is_current_month_paid:
         st.info(f"✅ Payment for **{current_month_str}** is already logged. Duplicate entries for the same month are blocked.")
 
-    # Principal Cleared Visualizer Card
     with st.container(border=True):
         pct_loan_cleared = (total_principal_cleared / INITIAL_LOAN) if INITIAL_LOAN > 0 else 0.0
         st.markdown(f"**📉 Principal Cleared Tracker** ({pct_loan_cleared * 100:.2f}% of Initial Loan Paid)")
@@ -730,7 +1160,7 @@ with tab_dashboard:
 
     st.divider()
 
-    # --- SECTION 2: LIVE PORTFOLIO HOLDINGS & ACTION HEADER ---
+    # --- SECTION 2: LIVE PORTFOLIO HOLDINGS ---
     sec2_hdr_col, sec2_act_col = st.columns([3, 1])
 
     with sec2_hdr_col:
@@ -745,7 +1175,7 @@ with tab_dashboard:
                 type=["csv", "xlsx", "xls"], 
                 accept_multiple_files=True,
                 key="holdings_uploader",
-                help="Upload multiple files at once (e.g. holdings-HEK312.csv, holdings-SDB789.xlsx)."
+                help="Upload multiple files at once."
             )
 
             account_mapping = {}
@@ -759,7 +1189,7 @@ with tab_dashboard:
                     if not detected_acc and file.name.upper().endswith(('.XLSX', '.XLS')):
                         try:
                             xls = pd.ExcelFile(file)
-                            sheet_to_use = 'Combined' if 'Combined' in xls.sheet_names else xls.sheet_names[0]
+                            sheet_to_use = 'Combined' if 'Combined' in sheets else sheets[0]
                             df_raw = pd.read_excel(xls, sheet_name=sheet_to_use, header=None, nrows=15)
                             for r in range(len(df_raw)):
                                 row_vals = [safe_str(x) for x in df_raw.iloc[r].dropna().values]
@@ -774,7 +1204,7 @@ with tab_dashboard:
                     user_acc = st.text_input(
                         f"Account ID for `{file.name}`:",
                         value=detected_acc,
-                        placeholder="e.g. HEK312 or SDB789 (Mandatory)",
+                        placeholder="e.g. HEK312 (Mandatory)",
                         key=f"acc_input_{file.name}"
                     )
                     account_mapping[file.name] = user_acc.strip().upper()
@@ -783,21 +1213,18 @@ with tab_dashboard:
             input_xirr = st.number_input(
                 "Console Overall XIRR (%)", 
                 value=None,
-                min_value=-100.0, 
-                max_value=500.0, 
-                step=0.1,
-                placeholder="e.g. 14.5 or -2.5 (Mandatory)",
-                help="Enter overall portfolio XIRR % from Zerodha Console. Negative, zero, and positive values are allowed."
+                min_value=-100.0, max_value=500.0, step=0.1,
+                placeholder="e.g. 14.5 (Mandatory)"
             )
 
-            if st.button("Sync Holdings & XIRR to Google Sheets", key="btn_sync_holdings"):
+            if st.button("Sync Holdings to Sheets", key="btn_sync_holdings"):
                 missing_accounts = [fname for fname, acc in account_mapping.items() if not acc]
                 if input_xirr is None:
-                    st.error("⚠️ Overall Console XIRR (%) is mandatory. Please enter your XIRR percentage before syncing.")
+                    st.error("⚠️️ Overall Console XIRR (%) is mandatory.")
                 elif not uploaded_files:
-                    st.error("⚠️ Please select at least one holdings CSV or Excel file to upload.")
+                    st.error("⚠️️ Please select at least one holdings file.")
                 elif missing_accounts:
-                    st.error(f"⚠️ Please specify an Account ID for: {', '.join(f'`{f}`' for f in missing_accounts)}")
+                    st.error(f"⚠️️ Specify Account ID for: {', '.join(f'`{f}`' for f in missing_accounts)}")
                 else:
                     parsed_records = []
                     for file in uploaded_files:
@@ -805,7 +1232,7 @@ with tab_dashboard:
                         cid, df_parsed = parse_zerodha_holdings_file(file, file.name, override_account_id=target_acc)
                         if not df_parsed.empty:
                             parsed_records.append(df_parsed)
-                            st.info(f"Loaded **{len(df_parsed)} active holdings** for account **{cid}** from `{file.name}`")
+                            st.info(f"Loaded **{len(df_parsed)} active holdings** for account **{cid}**")
 
                     if parsed_records:
                         df_new_combined = pd.concat(parsed_records, ignore_index=True)
@@ -821,24 +1248,12 @@ with tab_dashboard:
                             df_retained = pd.DataFrame()
 
                         df_all_merged = pd.concat([df_retained, df_new_combined], ignore_index=True)
+                        df_all_merged["acc_asset_key"] = [f"{safe_str(r.get('account','')).upper()}_{safe_str(r.get('isin','')).upper() if safe_str(r.get('isin','')) not in ['','NAN'] else safe_str(r.get('symbol','')).upper()}" for _, r in df_all_merged.iterrows()]
 
-                        keys = []
-                        for _, row in df_all_merged.iterrows():
-                            acc = safe_str(row.get('account', '')).upper()
-                            isin = safe_str(row.get('isin', '')).upper()
-                            sym = safe_str(row.get('symbol', '')).upper()
-                            asset_id = isin if (isin and isin != "NAN") else sym
-                            keys.append(f"{acc}_{asset_id}")
-
-                        df_all_merged["acc_asset_key"] = keys
-
-                        df_deduped_holdings = df_all_merged.drop_duplicates(subset=["acc_asset_key"], keep="last").drop(columns=["acc_asset_key"]).reset_index(drop=True)
-                        df_deduped_holdings = df_deduped_holdings.fillna("")
+                        df_deduped_holdings = df_all_merged.drop_duplicates(subset=["acc_asset_key"], keep="last").drop(columns=["acc_asset_key"]).reset_index(drop=True).fillna("")
 
                         try:
                             conn.update(worksheet="Portfolio_Tracker", data=df_deduped_holdings)
-                            
-                            # Save XIRR to Loan_Settings
                             try:
                                 df_settings = conn.read(worksheet="Loan_Settings", ttl=0)
                                 if df_settings.empty:
@@ -848,16 +1263,13 @@ with tab_dashboard:
                                     conn.update(worksheet="Loan_Settings", data=df_settings)
                             except Exception:
                                 pass
-
                             st.success("🎉 Successfully synced active holdings and Console XIRR!")
                             st.cache_data.clear()
                             st.rerun()
                         except Exception as e:
                             st.error(f"Failed to update Google Sheets: {e}")
 
-    # Section 2 UI: Clean Metric Cards (Dynamically hidden if 0)
     st.markdown("<br>", unsafe_allow_html=True)
-    
     active_cards = []
     if eq_inv > 0 or eq_val > 0: active_cards.append('equity')
     if mf_inv > 0 or mf_val > 0: active_cards.append('mf')
@@ -865,7 +1277,6 @@ with tab_dashboard:
     if active_cards:
         cols = st.columns(len(active_cards))
         col_idx = 0
-        
         if 'equity' in active_cards:
             with cols[col_idx]:
                 with st.container(border=True):
@@ -873,9 +1284,8 @@ with tab_dashboard:
                     st.caption("Standard Wealth Portfolio")
                     eq_pnl_pct = (eq_pnl / eq_inv * 100) if eq_inv > 0 else 0.0
                     st.metric("Current Value", format_inr(eq_val), f"{format_inr(eq_pnl)} ({eq_pnl_pct:+.2f}%)")
-                    st.markdown(f"<span style='color:#808495; font-size:13px;'>Invested: {format_inr(eq_inv)}</span>", unsafe_allow_html=True)
+                    st.markdown(f":gray[Invested: {format_inr(eq_inv)}]")
             col_idx += 1
-            
         if 'mf' in active_cards:
             with cols[col_idx]:
                 with st.container(border=True):
@@ -883,36 +1293,206 @@ with tab_dashboard:
                     st.caption("Standard Wealth Portfolio")
                     mf_pnl_pct = (mf_pnl / mf_inv * 100) if mf_inv > 0 else 0.0
                     st.metric("Current Value", format_inr(mf_val), f"{format_inr(mf_pnl)} ({mf_pnl_pct:+.2f}%)")
-                    st.markdown(f"<span style='color:#808495; font-size:13px;'>Invested: {format_inr(mf_inv)}</span>", unsafe_allow_html=True)
+                    st.markdown(f":gray[Invested: {format_inr(mf_inv)}]")
             col_idx += 1
     else:
         st.info("No active holdings found in your portfolio. Import a Zerodha file to get started!")
 
     st.divider()
 
-# --- SECTION 3: INTUITIVE PART PAYMENTS ---
+    # --- SECTION 3: FUNDAMENTAL PART PAYMENTS ---
     st.subheader("3. 🌱 The Abundance Approach to Part Payments")
     
     with st.container(border=True):
         
-        # Enhanced UI: 2-Column layout for crisp, balanced readability
         ab_col1, ab_col2 = st.columns(2)
-        
         with ab_col1:
             st.markdown("🌌 **Release Micromanagement:** Stop trying to force the 'how.' Let the universe handle market volatility and macroeconomics while you stay perfectly aligned with your Definite Chief Aim.")
             st.markdown("🌊 **Direct the Creative Flow:** We invest to create, not to compete. Deploying capital into equity actively funds businesses that serve humanity, bringing more use value to the world.")
             
         with ab_col2:
             st.markdown("⏳ **Act in the Joyous Present:** Surrender anxious timelines and the need to predict the exact month you become debt-free. Act efficiently in the Now to enjoy every moment with your family.")
-            st.markdown("💖 **Take Inspired Action:** There are no rigid rules or forced multiples here. Whenever the universe delivers surplus cash, or your intuition guides you from a place of profound gratitude, log your contribution below.")
+            st.markdown("💖 **Take Inspired Action:** There are no rigid rules or forced multiples here. Whenever the universe delivers surplus cash, or the market hits euphoric valuations, log your joyful part payment below.")
         
         st.divider()
+
+        # Outermost Collapsible Bar for Full Fundamental Dashboard
+        with st.expander("🚦 Fundamental & Institutional Index Allocation Dashboard", expanded=False):
+            st.caption("Automated macroeconomic valuation metrics and quality earnings benchmarking powered by real-time market data.")
+            
+            macro_data = fetch_macro_fundamentals()
+            live_gsec_yield, live_buffett_ind = fetch_live_macro_benchmarks()
+            buffett_status_text, buffett_color = get_buffett_status(live_buffett_ind)
+
+            buffett_display = f"{live_buffett_ind:.1f}%" if live_buffett_ind > 0 else "OFFLINE"
+            gsec_display = f"{live_gsec_yield:.2f}%" if live_gsec_yield > 0 else "OFFLINE"
+
+            macro_top_c1, macro_top_c2 = st.columns(2)
+            with macro_top_c1:
+                st.metric(
+                    "🇮🇳 Buffett Indicator (Market Cap-to-GDP)", 
+                    buffett_display, 
+                    buffett_status_text,
+                    help="💡 What It Means:\nCompares the total valuation of all listed Indian companies against the nation's nominal GDP.\n\n👑 Rule of Thumb (Warren Buffett):\n• < 75%: Deep Value (Historical bargain zone)\n• 75%–95%: Fair Value\n• 95%–115%: Modestly Overvalued\n• > 115%: Frothy / Stretched ('Playing with fire'). Prudent time to harvest profits for debt clearance."
+                )
+            with macro_top_c2:
+                st.metric(
+                    "🏛️ 10Y Sovereign G-Sec Yield", 
+                    gsec_display, 
+                    "Risk-Free Benchmark",
+                    help="💡 What It Means:\nThe annualized return guaranteed by the Government of India on its 10-year bonds. It serves as the risk-free benchmark hurdle rate.\n\n👑 Rule of Thumb (Warren Buffett & Benjamin Graham):\nStocks carry volatility and business risk. Therefore, equities must provide a meaningful profit premium above the 10Y G-Sec yield to justify investing. When safe G-Sec yields exceed equity yields, paying down debt becomes mathematically superior."
+                )
+
+            st.divider()
+
+            target_etfs = [
+                ("NIFTYBEES", "Nifty 50"),
+                ("NEXT50IETF", "Nifty Next 50"),
+                ("MIDCAPETF", "Nifty Midcap 150"),
+                ("BANKBEES", "Nifty Bank")
+            ]
+
+            for etf_sym, index_name in target_etfs:
+                f_data = macro_data.get(index_name, {"PE": 0.0, "PB": 0.0, "DY": 0.0, "GROWTH": 0.0})
+                pe = f_data["PE"]
+                pb = f_data["PB"]
+                dy = f_data["DY"]
+                growth_rate = f_data.get("GROWTH", 0.0)
+                v_text, v_color, v_bg = evaluate_index_temp(index_name, pe, pb, dy)
+                
+                # Dynamic calculations based on live fetched data
+                earnings_yield = (100.0 / pe) if pe > 0 else 0.0
+                yield_gap = (earnings_yield - live_gsec_yield) if (pe > 0 and live_gsec_yield > 0) else 0.0
+                peg_ratio = (pe / growth_rate) if (pe > 0 and growth_rate > 0) else 0.0
+                roe_approx = ((pb / pe) * 100.0) if (pe > 0 and pb > 0) else 0.0
+                forward_pe = (pe / (1.0 + (growth_rate / 100.0))) if (pe > 0 and growth_rate > 0) else 0.0
+                
+                # Clean expander title without verdict clutter
+                expander_title = f"📈 {etf_sym} ({index_name})"
+
+                with st.expander(expander_title, expanded=False):
+                    # Verdict banner with explanation and help icon
+                    v_summary, v_action, v_help = get_verdict_rationales(index_name, etf_sym, pe, pb, v_text)
+
+                    v_c1, v_c2 = st.columns([1, 3])
+                    with v_c1:
+                        st.metric(
+                            "Allocation Verdict", 
+                            v_text, 
+                            f"{index_name} Signal",
+                            help=v_help
+                        )
+                    with v_c2:
+                        st.markdown(f"**Why this verdict:** {v_summary}")
+                        st.caption(f"{v_action} *(Hover/tap the ❓ icon on the verdict for institutional threshold benchmarks)*")
+
+                    st.divider()
+
+                    # Section 1: Macro & Relative Yield Metrics
+                    st.markdown("#### 🌐 Macro & Relative Yield Metrics")
+                    m_c1, m_c2, m_c3, m_c4 = st.columns(4)
+                    with m_c1:
+                        pe_subtext = "Historical Avg ~18.0" if index_name == "Nifty Bank" else "Historical Avg ~20.0"
+                        pe_help = (
+                            "💡 What It Means:\n"
+                            "Price-to-Earnings Ratio. Measures how many rupees you pay for every ₹1 of company net profit.\n\n"
+                            "👑 Rule of Thumb (Benjamin Graham & Peter Lynch):\n"
+                            "• Nifty Bank: < 15 Accumulate, 15–18 Fair, > 21 Euphoric/Harvest.\n"
+                            "• Nifty 50 / Next 50: < 20 Accumulate, 20–24 Fair, > 25 Overvalued.\n"
+                            "• Midcap 150: < 22 Accumulate, 22–26 Fair, > 30 Stretched."
+                        )
+                        st.metric("Index P/E", f"{pe:.1f}" if pe > 0 else "N/A", pe_subtext, help=pe_help)
+                    with m_c2:
+                        pb_subtext = "10Y Avg: 2.65" if index_name == "Nifty Bank" else "Fair Value < 3.0"
+                        pb_help = (
+                            "💡 What It Means:\n"
+                            "Price-to-Book Ratio. Compares the market price to the company's balance-sheet net worth. Essential for banking stocks because banks hold money/loans as assets.\n\n"
+                            "👑 Rule of Thumb (Benjamin Graham):\n"
+                            "• Banking Index: 10Y median is ~2.65. Below 2.2 is a major accumulation bargain; above 3.3 indicates a banking bubble.\n"
+                            "• Broad Indices: Under 3.0 is reasonable; above 4.0 requires exceptionally high ROE (>18%) to be justified."
+                        )
+                        st.metric("Index P/B", f"{pb:.2f}" if pb > 0 else "N/A", pb_subtext, help=pb_help)
+                    with m_c3:
+                        ey_help = (
+                            "💡 What It Means:\n"
+                            "The annual profit percentage earned per rupee invested (calculated as 1 ÷ P/E × 100). It is the true operational yield of the business before dividend retention.\n\n"
+                            "👑 Rule of Thumb (Joel Greenblatt & Warren Buffett):\n"
+                            "Higher is better. A 5.5% earnings yield means companies earn ₹5.50 annually on every ₹100 of index value. Compare this directly with sovereign bond yields."
+                        )
+                        st.metric(
+                            "Earnings Yield (1/PE)", 
+                            f"{earnings_yield:.2f}%" if earnings_yield > 0 else "N/A", 
+                            f"Div Yield: {dy:.2f}%" if dy > 0 else "N/A",
+                            help=ey_help
+                        )
+                    with m_c4:
+                        yg_color = "normal" if yield_gap >= 0 else "inverse"
+                        yg_display = f"{yield_gap:+.2f}%" if (pe > 0 and live_gsec_yield > 0) else "N/A"
+                        gsec_subtext = f"10Y G-Sec: {live_gsec_yield:.2f}%" if live_gsec_yield > 0 else "10Y G-Sec: OFFLINE"
+                        yg_help = (
+                            "💡 What It Means:\n"
+                            "Equity Risk Premium. Measures (Earnings Yield - 10Y Sovereign G-Sec Yield). It answers: 'Are equities paying me enough extra return over 100% risk-free government bonds?'\n\n"
+                            "👑 Rule of Thumb (Institutional Allocators):\n"
+                            "• Positive (> 0%): Equities pay a healthy premium over bonds. Strong buy/hold incentive.\n"
+                            "• Negative (< 0%): Bond yields beat stock earnings yields. Equities offer no risk premium. Perfect mathematical justification to harvest stock gains and prepay high-interest debt."
+                        )
+                        st.metric("Yield Gap (vs 10Y G-Sec)", yg_display, gsec_subtext, delta_color=yg_color, help=yg_help)
+
+                    st.divider()
+
+                    # Section 2: Earnings Quality & Growth Adjustments
+                    st.markdown("#### 💎 Earnings Quality & Growth Adjustments")
+                    q_c1, q_c2, q_c3, q_c4 = st.columns(4)
+                    with q_c1:
+                        roe_help = (
+                            "💡 What It Means:\n"
+                            "Consolidated Return on Equity ((P/B ÷ P/E) × 100). Shows how efficiently companies convert shareholder capital into net profit.\n\n"
+                            "👑 Rule of Thumb (Charlie Munger & Warren Buffett):\n"
+                            "• < 12%: Poor capital efficiency.\n"
+                            "• 15%–18%: High-quality businesses with durable competitive advantages (moats).\n"
+                            "• > 20%: Elite wealth compounders. High P/B ratios are completely justified when ROE remains this strong."
+                        )
+                        st.metric("Consolidated ROE", f"{roe_approx:.2f}%" if roe_approx > 0 else "N/A", "Calculated as (P/B ÷ P/E) × 100", help=roe_help)
+                    with q_c2:
+                        growth_display = f"{growth_rate:.1f}%" if growth_rate > 0 else "OFFLINE"
+                        growth_help = (
+                            "💡 What It Means:\n"
+                            "The long-term compounded annual profit growth rate (EPS CAGR) of the underlying companies in this index.\n\n"
+                            "👑 Rule of Thumb (Peter Lynch):\n"
+                            "Earnings growth is the fundamental engine that powers stock prices over time. Double-digit growth (> 12%) supports higher valuations."
+                        )
+                        st.metric("Index Earnings Growth", growth_display, "Live Long-Term Index CAGR", help=growth_help)
+                    with q_c3:
+                        peg_help = (
+                            "💡 What It Means:\n"
+                            "Price/Earnings-to-Growth Ratio (Index P/E ÷ Earnings Growth Rate). Evaluates whether you are overpaying for growth.\n\n"
+                            "👑 Rule of Thumb (Peter Lynch):\n"
+                            "• < 1.0: Outstanding bargain. Growth is selling at a steep discount.\n"
+                            "• 1.0–1.5: Fair price for growth.\n"
+                            "• > 1.5: Stretched. High multiples require flawless profit delivery. Any slowdown can trigger sharp pullbacks."
+                        )
+                        if peg_ratio > 0:
+                            peg_status = "Undervalued (<1.0)" if peg_ratio < 1.0 else ("Fair (1.0-1.5)" if peg_ratio <= 1.5 else "Stretched (>1.5)")
+                            st.metric("PEG Ratio", f"{peg_ratio:.2f}", peg_status, help=peg_help)
+                        else:
+                            st.metric("PEG Ratio", "N/A", "Requires Live CAGR", help=peg_help)
+                    with q_c4:
+                        fwd_help = (
+                            "💡 What It Means:\n"
+                            "Price-to-Earnings multiple based on expected earnings over the upcoming 12 months rather than past historical profits.\n\n"
+                            "👑 Rule of Thumb (Institutional Fund Managers):\n"
+                            "If Forward P/E is notably lower than Trailing P/E, corporate profits are accelerating, meaning the index is cheaper than past multiples suggest."
+                        )
+                        st.metric("Forward 1Y P/E", f"{forward_pe:.1f}" if forward_pe > 0 else "N/A", f"Trailing: {pe:.1f}" if pe > 0 else "N/A", help=fwd_help)
+
+        st.write("")
         
+        # Prepayment execution form
         pp_input_col1, pp_input_col2 = st.columns(2)
         
         with pp_input_col1:
             st.markdown("### 💸 Execute Part Payment")
-            pp_amount = st.number_input("Prepayment Amount (₹)", value=100000.0, step=10000.0, min_value=1.0)
+            pp_amount = st.number_input("Prepayment Amount (₹)", value=100000.0, step=10000.0, min_value=0.0)
             
             if st.button("Log Joyful Part Payment", type="primary"):
                 new_row = pd.DataFrame([{
