@@ -521,6 +521,45 @@ with tab_aim:
 """, unsafe_allow_html=True)
 
     st.markdown("""
+<div style="background: linear-gradient(135deg, #0A1E29 0%, #0F2A3D 50%, #0D2030 100%); padding: 26px; border-radius: 18px; border: 1.5px solid #2DD4BF; box-shadow: 0 10px 30px rgba(45, 212, 191, 0.12); margin-bottom: 25px;">
+<h2 style="color: #2DD4BF; text-align: center; font-size: 24px; font-weight: 800; margin-bottom: 8px; letter-spacing: 0.5px;">🌱 The Deeper Meaning of My Portfolio</h2>
+<p style="color: #A5B4FC; font-size: 15px; text-align: center; font-style: italic; margin-bottom: 20px; line-height: 1.6;">"Deploying capital into equity actively funds businesses that serve humanity, bringing real use value to the world."</p>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;">
+<div style="background: rgba(255, 255, 255, 0.03); padding: 18px; border-radius: 12px; border-left: 4px solid #06D6A0;">
+<h4 style="color: #06D6A0; margin: 0 0 6px 0; font-size: 17px;">🩺 Heal</h4>
+<p style="color: #E2E8F0; font-size: 14px; margin: 0 0 10px 0; line-height: 1.5;">Develop and distribute treatments that alleviate suffering and support healthier lives.</p>
+<span style="color: #A5B4FC; font-size: 13px; font-weight: 600;">Divi's, Dr Reddy's, Zydus, PHARMABEES</span>
+</div>
+<div style="background: rgba(255, 255, 255, 0.03); padding: 18px; border-radius: 12px; border-left: 4px solid #FFD166;">
+<h4 style="color: #FFD166; margin: 0 0 6px 0; font-size: 17px;">🏗️ Build</h4>
+<p style="color: #E2E8F0; font-size: 14px; margin: 0 0 10px 0; line-height: 1.5;">Create infrastructure, tools and materials that expand society's productive capabilities.</p>
+<span style="color: #A5B4FC; font-size: 13px; font-weight: 600;">L&T, ACE, Astral, Polycab, INFRABEES</span>
+</div>
+<div style="background: rgba(255, 255, 255, 0.03); padding: 18px; border-radius: 12px; border-left: 4px solid #4CC9F0;">
+<h4 style="color: #4CC9F0; margin: 0 0 6px 0; font-size: 17px;">⚡ Energise</h4>
+<p style="color: #E2E8F0; font-size: 14px; margin: 0 0 10px 0; line-height: 1.5;">Provide the dependable electricity and industrial power that essential activities require.</p>
+<span style="color: #A5B4FC; font-size: 13px; font-weight: 600;">ABB, GVT&D, Siemens, Cummins India</span>
+</div>
+<div style="background: rgba(255, 255, 255, 0.03); padding: 18px; border-radius: 12px; border-left: 4px solid #F472B6;">
+<h4 style="color: #F472B6; margin: 0 0 6px 0; font-size: 17px;">🌾 Nourish</h4>
+<p style="color: #E2E8F0; font-size: 14px; margin: 0 0 10px 0; line-height: 1.5;">Improve agricultural productivity and the movement of water that supports farms and communities.</p>
+<span style="color: #A5B4FC; font-size: 13px; font-weight: 600;">M&M, Swaraj Engines, KSB, Oswal Pumps</span>
+</div>
+<div style="background: rgba(255, 255, 255, 0.03); padding: 18px; border-radius: 12px; border-left: 4px solid #818CF8;">
+<h4 style="color: #818CF8; margin: 0 0 6px 0; font-size: 17px;">💡 Innovate and Enable</h4>
+<p style="color: #E2E8F0; font-size: 14px; margin: 0 0 10px 0; line-height: 1.5;">Make useful industrial, digital and specialised processes more capable and efficient.</p>
+<span style="color: #A5B4FC; font-size: 13px; font-weight: 600;">ITBEES, Clean Science, Inox India, BANKBEES</span>
+</div>
+<div style="background: rgba(255, 255, 255, 0.03); padding: 18px; border-radius: 12px; border-left: 4px solid #38BDF8;">
+<h4 style="color: #38BDF8; margin: 0 0 6px 0; font-size: 17px;">🛡️ Connect and Protect</h4>
+<p style="color: #E2E8F0; font-size: 14px; margin: 0 0 10px 0; line-height: 1.5;">Support mobility, security and the ability of people and communities to carry out daily life.</p>
+<span style="color: #A5B4FC; font-size: 13px; font-weight: 600;">AUTOBEES, MODEFENCE</span>
+</div>
+</div>
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("""
 <div style="background: linear-gradient(135deg, #1E1B4B 0%, #0F172A 50%, #1E293B 100%); padding: 26px; border-radius: 18px; border: 1.5px solid #818CF8; box-shadow: 0 10px 30px rgba(129, 140, 248, 0.12); margin-bottom: 25px;">
 <h2 style="color: #A5B4FC; text-align: center; font-size: 24px; font-weight: 800; margin-bottom: 16px; letter-spacing: 0.5px;">💪 Napoleon Hill's 5-Step Self-Confidence Formula</h2>
 <div style="display: flex; flex-direction: column; gap: 12px;">
